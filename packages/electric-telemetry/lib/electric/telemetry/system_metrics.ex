@@ -21,8 +21,6 @@ defmodule ElectricTelemetry.SystemMetrics do
       of this scaffolding.
   """
 
-  require Logger
-
   @system_info_key {__MODULE__, :system_info}
   @fragmentation_gate_key {__MODULE__, :fragmentation_gate}
 
