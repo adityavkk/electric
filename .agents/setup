@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+export CI=true
+
+step() {
+  local label="$1" start=$SECONDS
+  shift
+  printf '\n[orb setup] %s\n' "$label"
+  "$@"
+  printf '[orb setup] %s completed in %ss\n' "$label" "$((SECONDS - start))"
+}
+
+install_system_packages() {
+  local missing=() package
+  for package in build-essential pkg-config libssl-dev libncurses6 libodbc2 \
+    unzip curl ca-certificates git shellcheck postgresql-client \
+    docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; do
+    if [[ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null || true)" != 'install ok installed' ]]; then
+      missing+=("$package")
+    fi
+  done
+  if ((${#missing[@]})); then
+    if [[ ! -f /etc/apt/sources.list.d/docker.list ]]; then
+      sudo install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL https://download.docker.com/linux/debian/gpg | sudo tee /etc/apt/keyrings/docker.asc >/dev/null
+      printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable\n' \
+        "$(dpkg --print-architecture)" | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+    fi
+    sudo apt-get update -qq
+    sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}"
+    if [[ " ${missing[*]} " == *' docker-ce '* ]]; then
+      # A newly installed daemon must not compete with the orb service.
+      sudo systemctl disable --now docker.service docker.socket containerd.service
+    fi
+  fi
+}
+
+install_toolchains() {
+  if [[ ! -x "$HOME/.local/bin/mise" ]]; then
+    curl -fsSL https://mise.run | MISE_VERSION=v2026.9.16 sh
+  fi
+  # Debian 12 can use Bob's Ubuntu 22.04 OTP builds. Never spend startup
+  # compiling OTP from source if a pinned precompiled release is unavailable.
+  export MISE_ERLANG_PRECOMPILED_OS=ubuntu-22.04 MISE_ERLANG_COMPILE=false
+  "$HOME/.local/bin/mise" trust "$repo_root/.tool-versions"
+  "$HOME/.local/bin/mise" install --yes
+  eval "$("$HOME/.local/bin/mise" env --shell bash)"
+
+  # Rust has no exact pin in this repo; follow server_rust_tests.yml (stable).
+  export PATH="$HOME/.cargo/bin:$PATH"
+  if ! command -v rustup >/dev/null; then
+    curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --no-modify-path
+  fi
+  if ! rustup toolchain list | grep -q '^stable-'; then
+    rustup toolchain install stable --profile minimal
+  fi
+}
+
+persist_environment() {
+  local marker='# Electric orb toolchains'
+  if ! grep -Fqx "$marker" "$HOME/.bash_profile" 2>/dev/null; then
+    cat >> "$HOME/.bash_profile" <<EOF
+
+$marker
+case "\$PWD/" in
+  "$repo_root/"*)
+    if [[ -z "\${ELECTRIC_ORB_ENV:-}" ]]; then
+      export ELECTRIC_ORB_ENV=1
+      eval "\$("\$HOME/.local/bin/mise" env --shell bash)"
+      export PATH="\$HOME/.cargo/bin:\$PATH"
+    fi
+    ;;
+esac
+EOF
+  fi
+}
+
+prepare_elixir() {
+  # --if-missing avoids fetching Hex and Rebar again on a warm snapshot.
+  mix local.hex --force --if-missing
+  mix local.rebar --force --if-missing
+  local package
+  for package in electric-telemetry elixir-client sync-service; do
+    (
+      cd "packages/$package"
+      mix deps.get --check-locked
+      mix deps.compile
+      MIX_ENV='test' mix deps.compile
+    )
+  done
+}
+
+step 'System dependencies' install_system_packages
+step 'Pinned toolchains' install_toolchains
+step 'Login-shell environment' persist_environment
+step 'Workspace dependencies' pnpm install --frozen-lockfile \
+  --config.only-built-dependencies-file="$repo_root/.agents/pnpm-builds.json"
+step 'Shared TypeScript builds' pnpm -r --filter electric-ax... --filter @electric-ax/agents-server... build
+step 'Elixir dependencies (dev and test)' prepare_elixir
+step 'Rust dependencies' cargo +stable fetch --locked --manifest-path packages/durable-streams-rust/Cargo.toml
+
+printf '\n[orb setup] Ready. Start Docker when needed with: amp orb services ensure\n'

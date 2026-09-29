@@ -44,3 +44,6 @@ _artifacts
 
 # npm local cache/logs
 .npm/
+
+# Generated orb portal state
+.amp/portals/

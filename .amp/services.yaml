@@ -1,0 +1,4 @@
+services:
+  docker:
+    command: sudo dockerd --group "$(id -gn)"
+    platforms: [linux]

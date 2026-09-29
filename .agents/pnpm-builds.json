@@ -1,0 +1,17 @@
+[
+  "@sentry/cli",
+  "@swc/core",
+  "@tailwindcss/oxide",
+  "better-sqlite3",
+  "cpu-features",
+  "electron",
+  "esbuild",
+  "lmdb",
+  "msgpackr-extract",
+  "protobufjs",
+  "rolldown",
+  "sharp",
+  "ssh2",
+  "supabase",
+  "vue-demi"
+]

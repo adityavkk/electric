@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Toolchains and dependency caches survive pause/resume. No installs or servers
+# belong here; .amp/services.yaml supervises Docker when integration tests need it.
+printf '[orb resume] Using cached toolchains and dependencies.\n'

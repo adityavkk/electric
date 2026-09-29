@@ -241,6 +241,24 @@ ELECTRIC_AGENTS_SERVER_URL=http://localhost:4437 \
 
 Logs land in `.dev-logs/`. Use `--detach` with `start` to background the stack. See **[docs/agents-development.md](docs/agents-development.md)** for the full manual flow, env vars, testing, and iteration workflows.
 
+### Amp orbs
+
+`.agents/setup` installs the `.tool-versions` pins, Rust stable (matching CI),
+Docker/Compose, workspace dependencies, shared TypeScript builds, and Elixir dev/test
+dependencies. Amp snapshots these files; `.agents/resume` does not reinstall them.
+Login shells in this checkout automatically select the installed toolchains.
+The setup-only `.agents/pnpm-builds.json` allowlist enables required native install
+scripts without changing the workspace's normal pnpm build policy.
+
+Run `amp orb services ensure` to start the supervised Docker daemon, then wait for
+`docker info` to succeed before using the existing Compose commands below. Database
+containers and images are created on demand, not during setup. For application
+servers use `amp orb service start` rather than `scripts/dev.sh start --detach`;
+ordinary background processes do not survive orb restarts. LLM credentials belong
+in Amp secrets, never in setup or committed files. Electron's `rebuild:native`
+remains a separate step when working on the desktop app because it targets a
+different ABI than Node.
+
 ## Working on the TypeScript client
 
 Before making changes to `packages/typescript-client`, **always read `packages/typescript-client/SPEC.md` first**. It is the single source of truth for the ShapeStream state machine — invariants, constraints, state transitions, and how they're enforced. Design fixes and features around the spec's invariants rather than patching symptoms ad-hoc.
